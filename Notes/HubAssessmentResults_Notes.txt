@@ -1,0 +1,104 @@
+Based on all the notes below, I need you to craft a cleaning script for me called Clean_HubAssessmentResults.ipynb.
+Input File:  input/HubAssessmentResults_2026-08-02.xlsx
+
+You may look at the other scripts for inspiration so that the cleaning script you generate has the same style and format:
+Clean_HubDailyContent.ipynb
+Clean_HubDailyEvents.ipynb
+Clean_HubDailyUsers.ipynb
+Clean_HubMonthlyUsers.ipynb
+
+# Clean_HubAssessmentResults Notes.  Please take note that all the steps below are not necessarily in the optimal order. You may reshuffle the order of the steps where necessary.
+
+[x] Read in the Data from the HubAssessmentResults_yyyy-mm-dd.xlsx file (Sheet1).
+	Read with the "utf-8" encoding.
+	Ingest with the following logic:
+	```python
+with open(input_path, "r", encoding="utf-8") as f:
+    raw_text = f.read()
+
+# Protect literal backslashes that aren't a genuine CSV \" escape (e.g. the real
+# company name "TBWA\RAAD") by doubling them, so escapechar below only ever consumes
+# actual \" sequences and every other backslash survives as a literal single backslash.
+protected_text = re.sub(r'\\(?!")', r"\\\\", raw_text)
+
+df_raw = pd.read_csv(
+    io.StringIO(protected_text), sep=";", engine="python", escapechar="\\",
+    dtype=str, keep_default_na=False, encoding="utf-8",
+)
+	```
+
+[x] Derive the `month-tag` from the filename, and subtract 1 month from it.  Store the result inside `year`, `month` variables respectively.
+    Concatenate `year` and `month` into a single string: `month_tag` = <year><month>.
+
+[x] The Data Columns need to be sorted in the following order 
+LS_COLS = [
+	Date	CompanyCode	CompanyName	CurrentCountry	HomeCountry	Operation	AssessmentType	SectionName	Result
+	]
+Drop any columns that are not contained in `LS_COLS`
+
+[x] Convert `Date` entries to the following format: ("%Y-%m-%d %H:%M:%S.%f").str[:-3]
+
+[x] Strip any HTML opening tags, closing tags, attributes, HTML entities, and other HTML artefacts from [SectionName].  Use the following Python Logic:
+```python
+HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def strip_html(value: str) -> str:
+    text = HTML_TAG_RE.sub("", value)
+    text = html.unescape(text)
+    return text.replace("\xa0", " ").strip()
+```
+
+[x] Apply lowercase text transformation to the [Result] column.
+
+[x] Trim any redundant white space, .str.strip(), in the following string fields:
+	LS_STR_COLS = [CompanyCode	CompanyName	CurrentCountry	HomeCountry	Operation	AssessmentType	SectionName	Result]
+	Remove leading space. trailing space. collapse any double-space to a single space.
+
+[x] Remove any rows (evaluated against LS_COLS) that are completely blank.
+
+[x] Remove any rows where `Date` is blank.
+
+[x] There are no Integer-type columns.  Therefore, LS_INT = [].
+
+[x] Sort the table in Ascending (or A->Z) order based on the following columns: [Date	CompanyCode	CompanyName	CurrentCountry	HomeCountry	Operation].
+
+[x] There is NO LOGIC to collapse duplicate rows in the cleaned dataset.
+But given the granularity of the Date field, the chances of encountering any duplicates are close to zero.
+If there are any duplicates, please report on that in the generated _report.txt file.
+
+# Save the dataset
+Look at the filename of the input data.
+
+Save and store the dataset as: HubAssessmentResults_<month_tag>_cleaned.csv
+So, as an example, the input of HubAssessmentResults_2026-08-02.xlsx would lead to the output: HubAssessmentResults_202607_cleaned.csv
+Use ";" as the field delimiter.
+
+[x] Write a Summary Report that is very similar to reports/HubDailyContent_202607_report.txt. Here is example Python:
+```python
+report_lines = [
+    f"Input file: {input_path.name}",
+    f"Raw row count: {len(df_raw)}",
+    "Amount of duplicate rows identified". . .
+    "=======================================================================",
+    f"Month tag: {month_tag}",
+    f"Blank/missing-key rows dropped: {len(df_raw) - rows_before_dedup}",
+    "=======================================================================",
+    f"Cleaned row count: {len(df_cleaned)}",
+    f"Output file: {output_path.name}",
+]
+report_text = "\n".join(report_lines) + "\n"
+report_text += "\n\n\n" + df_cleaned.describe().to_string() + "\n"
+
+reports_dir = NOTEBOOK_DIR / "reports"
+reports_dir.mkdir(parents=True, exist_ok=True)
+report_path = reports_dir / f"HubDailyContent_{month_tag}_report.txt"
+report_path.write_text(report_text, encoding="utf-8")
+
+print(report_text)
+print(f"Report written -> {report_path}")
+```
+
+# Wrap Up
+* Integrate the logic of Clean_HubAssessmentResults.ipynb at the end of the Clean_Raw_Hub.ipynb notebook.
+* Make the necessary updates to Clean_Raw_Hub.py to ensure that it mirrors Clean_Raw_Hub.ipynb as closely as possible.

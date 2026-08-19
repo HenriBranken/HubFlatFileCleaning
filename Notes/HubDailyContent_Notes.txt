@@ -1,0 +1,47 @@
+# Clean_HubDailyContent
+
+[x] Read in the data using the following options while bearing in mind that the .csv uses a semicolon ";" as the field delimiter:  engine='python', escapechar='\\'
+	Read with the "utf-8" encoding.
+
+[x] Locate the input file `HubDailyContentData_yyyy-mm-dd.csv"
+
+[x] Derive the `month-tag` from the filename, and subtract 1 month from it.  Store inside `year`, `month` variables respectively.
+    Concatenate `year` and `month` into a single string: `month_tag` = <year><month>.
+
+[x] Rename the following 2 columns as follows:
+	(i) ContentTitle     ->  ContentTitleLocalLanguage
+	(ii) ContentTitleEn  ->  ContentTitle
+
+[x] The Data Columns need to be sorted in the following order 
+LS_COLS = [Date,CompanyCode,CompanyName,Country,HomeCountry,HomeCountryCode,Operation,AppInterest,CategoryName,ContentTitleLocalLanguage,ContentTitle,ContentLanguage,ContentType,DeviceCategory,UserType,Users,TotalEvents,UniqueEvents,Stack,Route,Topic]
+Any other columns are redundant and may be dropped from the dataset.
+
+[x] Convert `Date` entries to the following format: "%Y-%m-%d %H:%M:%S.%f"
+
+[x] Drop any columns that are not contained in `LS_COLS`
+
+[x] Trim any redundant white space, .str.strip(), in the following string fields:
+	LS_STR_COLS = [
+		CompanyCode, CompanyName, Country, HomeCountry, HomeCountryCode, Operation,
+		AppInterest, CategoryName, ContentTitleLocalLanguage, ContentTitle, ContentLanguage,
+		ContentType, DeviceCategory, UserType, Users, TotalEvents, UniqueEvents, Stack, Route, Topic
+	]
+
+[x] Remove any rows that are completely blank.
+
+[x] Remove any rows where `Date` and `CompanyCode` are blank / missing.
+
+[x] Cast the following columns to Integer type columns:  LS_INT_COLS = ["Users", "TotalEvents", "UniqueEvents"]
+
+[x] Strip all HTML opening tags, closing tags, HTML entities, HTML attributes, and HTML metadata from the following columns:
+"ContentTitle", "ContentTitleEN", "Stack"
+
+
+# Save the dataset
+Look at the filename of the input data.
+
+Save and store the dataset as: HubMonthlyUsers_<month_tag>_cleaned.csv
+So, as an example, the input of HubDailyContent_2026-08-02.csv would lead to the output: HubDailyContent_202607_cleaned.csv
+Use ";" as the field delimiter.
+
+[x] Write a Summary Report.

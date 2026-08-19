@@ -1,0 +1,8 @@
+pandas>=3.0
+
+# For reading the HubAssessmentResults .xlsx workbook (pd.read_excel)
+openpyxl
+
+# For headlessly re-executing notebooks after edits (see CLAUDE.md "Commands")
+nbformat
+nbclient

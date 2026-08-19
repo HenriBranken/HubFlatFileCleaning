@@ -1,0 +1,20 @@
+SELECT 	
+	[Timestamp]		AS Date,
+	[PartitionKey]		AS CompanyCode,
+	[CompanyName],
+	[Country]		AS CurrentCountry,
+	[HomeCountry],
+	[Operation],
+	[Type]			AS AssessmentType,
+	[Name]			AS SectionName,
+	[Value]			AS Result
+ FROM [SalesforceStaging].[dbo].[Anonymous_HUB_Data]
+WHERE
+	[SourceSystem] = 'TableStorage'
+	AND 
+	[Timestamp] BETWEEN '2026-07-01' AND '2026-08-01'
+ORDER BY [TimeStamp] ASC;
+
+
+Final Column Names:
+Date;CompanyCode;CompanyName;CurrentCountry,HomeCountry;Operation;AssessmentType;SectionName;Result

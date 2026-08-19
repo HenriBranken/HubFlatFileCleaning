@@ -1,0 +1,25 @@
+# Read dataset into pandas
+
+# Column Renaming:
+[1] Date -> MonthDate
+
+# Column Order
+Reorder the columns according to this list of columns stored in the ls_cols variable:
+ls_cols = [MonthDate, Month, CompanyCode, CompanyName, Country, HomeCountry, HomeCountryCode, Operation, NewUsers, Users, Sessions, Hits]
+
+# Data Manipulations
+[1] Remove any rows that are completely blank
+[2] Convert `MonthDate` entries to the following format: "%Y-%m-%d %H:%M:%S.%f"
+[3] Convert the `Month` column to the following format:  "%Y %m"
+[4] Drop any columns that are not contained in `ls_cols`
+[5] Trim any redundant white space around the following string fields:
+	ls_string_cols = [
+		CompanyCode, CompanyName, Country, HomeCountry, HomeCountryCode, Operation
+	]
+
+# Save the dataset
+Look at the filename of the input data.
+Infer the year and month from the suffix of the file name: "yyyy-mm-dd.csv", and store it in the variable `month_tag`.
+Save and store the dataset as: HubMonthlyUsers_<month_tag>_cleaned.csv
+So, as an example, the input of HubMonthlyUsers_2026-08-02.csv would lead to the output: HubMonthlyUsers_202608_cleaned.csv
+Use ";" as the field delimiter.

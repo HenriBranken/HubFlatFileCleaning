@@ -1,0 +1,42 @@
+# Clean_HubDailyUsers Data.
+
+[x] Read in the data using the following options while bearing in mind that the .csv uses a semicolon ";" as the field delimiter:  engine='python', escapechar='\\'
+	Read with the "utf-8" encoding.
+
+[x] Locate the input file `HubDailyContentData_yyyy-mm-dd.csv"
+
+[x] Derive the `month-tag` from the filename, and subtract 1 month from it.  Store the result inside `year`, `month` variables respectively.
+    Concatenate `year` and `month` into a single string: `month_tag` = <year><month>.
+
+[x] Drop the `SessionDuration` column, and rename `SessionDurationInSeconds` to `SessionDuration`.
+
+[x] The Data Columns need to be sorted in the following order 
+LS_COLS = [
+	Date	CompanyCode	CompanyName	Country	HomeCountry	HomeCountryCode	Operation	DeviceCategory	UserType	Users	Sessions	SessionDuration
+]
+Drop any columns that are not contained in `LS_COLS`
+
+[x] Convert `Date` entries to the following format: ("%Y-%m-%d %H:%M:%S.%f").str[:-3]
+
+[x] Trim any redundant white space, .str.strip(), in the following string fields:
+	LS_STR_COLS = ['CompanyCode', 'CompanyName', 'Country', 'HomeCountry', 'HomeCountryCode', 'Operation', 'DeviceCategory', 'UserType']
+
+[x] Remove any rows that are completely blank.
+
+[x] Remove any rows where `Date` and/or `CompanyCode` are blank.
+
+[x] Cast the following columns to Integer type columns:  LS_INT_COLS = ["Sessions", "Users"]
+
+[x] It appears that the column "SessionDuration" has the time format of:  hh:mm:ss.
+
+[x] Sort the table in Ascending (or A->Z) order based on the following columns: ['Date', 'CompanyCode', 'CompanyName', 'Country', 'HomeCountry', 'HomeCountryCode'].
+
+
+# Save the dataset
+Look at the filename of the input data.
+
+Save and store the dataset as: HubDailyUsers_<month_tag>_cleaned.csv
+So, as an example, the input of HubDailyUsers_2026-08-02.csv would lead to the output: HubDailyUsers_202607_cleaned.csv.
+Use ";" as the field delimiter.
+
+[x] Write a Summary Report.
