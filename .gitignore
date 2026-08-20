@@ -15,6 +15,11 @@ reports/*
 !output/.gitkeep
 !reports/.gitkeep
 
+# Sync the to_upload folder, but ignore the CSV files inside it
+!output/to_upload/
+!output/to_upload/.gitkeep
+output/to_upload/*.csv
+
 # Claude Code
 .claude/
 CLAUDE.md
