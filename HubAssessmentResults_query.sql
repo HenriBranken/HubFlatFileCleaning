@@ -1,6 +1,6 @@
 SELECT 	
 	[Timestamp]		AS Date,
-	[PartitionKey]		AS CompanyCode,
+	[PartitionKey]	AS CompanyCode,
 	[CompanyName],
 	[Country]		AS CurrentCountry,
 	[HomeCountry],
@@ -12,9 +12,9 @@ SELECT
 WHERE
 	[SourceSystem] = 'TableStorage'
 	AND 
-	[Timestamp] BETWEEN '2026-07-01' AND '2026-08-01'
+	[Timestamp] BETWEEN '2026-08-01' AND '2026-09-01'
 ORDER BY [TimeStamp] ASC;
 
 
-Final Column Names:
-Date;CompanyCode;CompanyName;CurrentCountry,HomeCountry;Operation;AssessmentType;SectionName;Result
+-- Final Column Names:
+-- Date;CompanyCode;CompanyName;CurrentCountry,HomeCountry;Operation;AssessmentType;SectionName;Result
