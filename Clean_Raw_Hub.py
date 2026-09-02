@@ -1,8 +1,9 @@
 """Clean the five raw Hub exports (HubDailyContent, HubDailyEvents, HubDailyUsers,
 HubMonthlyUsers, HubAssessmentResults) in one run.
 
-Reads from input/, writes cleaned CSVs to output/ and summary reports to reports/
-(all siblings of this script).
+Reads from input/, writes cleaned CSVs to output/, summary reports to reports/, and
+every dropped/duplicate-collapsed row (tagged with a DropReason column) to
+dropped_and_dupes/ (all siblings of this script).
 """
 import csv
 import html
@@ -16,6 +17,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 INPUT_DIR = SCRIPT_DIR / "input"
 OUTPUT_DIR = SCRIPT_DIR / "output"
 REPORTS_DIR = SCRIPT_DIR / "reports"
+DROPPED_DIR = SCRIPT_DIR / "dropped_and_dupes"
 
 
 def find_default_input(directory: Path, prefix: str, filename_re: re.Pattern, ext: str = "csv") -> Path:
@@ -73,6 +75,32 @@ def write_report(
     return report_path, report_text
 
 
+def write_dropped_and_dupes(
+    dropped_dir: Path,
+    prefix: str,
+    month_tag: str,
+    dropped_blank: pd.DataFrame,
+    duplicate_rows: pd.DataFrame,
+) -> Path:
+    """Write every row dropped for blank/missing-key data, plus every row belonging to a
+    collapsed duplicate group (all N rows per group, not the N-1 that get summed away),
+    tagged with a DropReason column so the two causes stay distinguishable.
+    """
+    dropped_blank = dropped_blank.copy()
+    dropped_blank.insert(0, "DropReason", "dropped blank")
+
+    duplicate_rows = duplicate_rows.copy()
+    duplicate_rows.insert(0, "DropReason", "duplicate collapsed")
+
+    combined = pd.concat([dropped_blank, duplicate_rows], ignore_index=True, sort=False)
+
+    dropped_dir.mkdir(parents=True, exist_ok=True)
+    out_path = dropped_dir / f"{prefix}_{month_tag}_dropped_and_dupes.csv"
+    combined.to_csv(out_path, index=False, encoding="utf-8", quoting=csv.QUOTE_MINIMAL)
+
+    return out_path
+
+
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -128,15 +156,19 @@ PREFIX_DC = "HubDailyContent"
 FILENAME_RE_DC = re.compile(r"^HubDailyContentData_(\d{4})-(\d{2})-\d{2}\.csv$")
 
 
-def clean_dc(df: pd.DataFrame) -> pd.DataFrame:
+def clean_dc(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df.rename(columns=RENAME_MAP_DC)
 
     present_ls_cols = [c for c in LS_COLS_DC if c in df.columns]
     is_blank = df[present_ls_cols].apply(lambda col: col.str.strip() == "").all(axis=1)
+    dropped_blank = df.loc[is_blank].copy()
     df = df.loc[~is_blank].copy()
 
     missing_key = df["Date"].str.strip() == ""
+    dropped_missing_key = df.loc[missing_key].copy()
     df = df.loc[~missing_key].copy()
+
+    dropped = pd.concat([dropped_blank, dropped_missing_key])
 
     # %f always zero-pads to 6-digit microseconds; slicing off the last 3 leaves milliseconds.
     df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d").dt.strftime("%Y-%m-%d %H:%M:%S.%f").str[:-3]
@@ -152,35 +184,40 @@ def clean_dc(df: pd.DataFrame) -> pd.DataFrame:
     for col in HTML_COLS_DC:
         df[col] = df[col].apply(strip_html)
 
-    return df
+    return df, dropped
 
 
-def collapse_duplicates_dc(df: pd.DataFrame) -> pd.DataFrame:
+def collapse_duplicates_dc(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df.copy()
+    duplicate_rows = df.loc[df.duplicated(subset=GROUP_COLS_DC, keep=False)].copy()
+
     for col in SUM_COLS_DC:
         df[col] = df[col].astype(int)
     df = df.groupby(GROUP_COLS_DC, as_index=False)[SUM_COLS_DC].sum()
-    return df[LS_COLS_DC]
+    return df[LS_COLS_DC], duplicate_rows
 
 
-def process_dc() -> tuple[Path, Path]:
+def process_dc() -> tuple[Path, Path, Path]:
     input_path = find_default_input(INPUT_DIR, INPUT_PREFIX_DC, FILENAME_RE_DC)
     month_tag = month_tag_from_filename(input_path, INPUT_PREFIX_DC, FILENAME_RE_DC)
 
     df_raw = read_semicolon_csv_protecting_backslashes(input_path)
-    df_before_dedup = clean_dc(df_raw)
-    df_cleaned = collapse_duplicates_dc(df_before_dedup)
+    df_before_dedup, dropped_blank_dc = clean_dc(df_raw)
+    df_cleaned, duplicate_rows_dc = collapse_duplicates_dc(df_before_dedup)
 
     output_path = OUTPUT_DIR / f"{PREFIX_DC}_{month_tag}_cleaned.csv"
     df_cleaned.to_csv(output_path, sep=";", index=False, encoding="utf-8", quoting=csv.QUOTE_MINIMAL)
     print(f"Cleaned {len(df_cleaned)} rows -> {output_path}")
+
+    dropped_path = write_dropped_and_dupes(DROPPED_DIR, PREFIX_DC, month_tag, dropped_blank_dc, duplicate_rows_dc)
+    print(f"Dropped/duplicate rows written -> {dropped_path}")
 
     report_path, _ = write_report(
         REPORTS_DIR, PREFIX_DC, month_tag, input_path, df_raw, df_before_dedup, df_cleaned, output_path
     )
     print(f"Report written -> {report_path}")
 
-    return output_path, report_path
+    return output_path, report_path, dropped_path
 
 
 # ============================================================
@@ -222,15 +259,19 @@ PREFIX_DE = "HubDailyEvents"
 FILENAME_RE_DE = re.compile(r"^HubDailyEventData_(\d{4})-(\d{2})-\d{2}\.csv$")
 
 
-def clean_de(df: pd.DataFrame) -> pd.DataFrame:
+def clean_de(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df.rename(columns=RENAME_MAP_DE)
 
     present_ls_cols = [c for c in LS_COLS_DE if c in df.columns]
     is_blank = df[present_ls_cols].apply(lambda col: col.str.strip() == "").all(axis=1)
+    dropped_blank = df.loc[is_blank].copy()
     df = df.loc[~is_blank].copy()
 
     missing_key = df["Date"].str.strip() == ""
+    dropped_missing_key = df.loc[missing_key].copy()
     df = df.loc[~missing_key].copy()
+
+    dropped = pd.concat([dropped_blank, dropped_missing_key])
 
     # %f always zero-pads to 6-digit microseconds; slicing off the last 3 leaves milliseconds.
     df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d").dt.strftime("%Y-%m-%d %H:%M:%S.%f").str[:-3]
@@ -254,35 +295,40 @@ def clean_de(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.sort_values(by=SORT_COLS_DE, ascending=True).reset_index(drop=True)
 
-    return df
+    return df, dropped
 
 
-def collapse_duplicates_de(df: pd.DataFrame) -> pd.DataFrame:
+def collapse_duplicates_de(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df.copy()
+    duplicate_rows = df.loc[df.duplicated(subset=GROUP_COLS_DE, keep=False)].copy()
+
     for col in SUM_COLS_DE:
         df[col] = df[col].astype(int)
     df = df.groupby(GROUP_COLS_DE, as_index=False)[SUM_COLS_DE].sum()
-    return df[LS_COLS_DE]
+    return df[LS_COLS_DE], duplicate_rows
 
 
-def process_de() -> tuple[Path, Path]:
+def process_de() -> tuple[Path, Path, Path]:
     input_path = find_default_input(INPUT_DIR, INPUT_PREFIX_DE, FILENAME_RE_DE)
     month_tag = month_tag_from_filename(input_path, INPUT_PREFIX_DE, FILENAME_RE_DE)
 
     df_raw = read_semicolon_csv_protecting_backslashes(input_path)
-    df_before_dedup = clean_de(df_raw)
-    df_cleaned = collapse_duplicates_de(df_before_dedup)
+    df_before_dedup, dropped_blank_de = clean_de(df_raw)
+    df_cleaned, duplicate_rows_de = collapse_duplicates_de(df_before_dedup)
 
     output_path = OUTPUT_DIR / f"{PREFIX_DE}_{month_tag}_cleaned.csv"
     df_cleaned.to_csv(output_path, sep=";", index=False, encoding="utf-8", quoting=csv.QUOTE_MINIMAL)
     print(f"Cleaned {len(df_cleaned)} rows -> {output_path}")
+
+    dropped_path = write_dropped_and_dupes(DROPPED_DIR, PREFIX_DE, month_tag, dropped_blank_de, duplicate_rows_de)
+    print(f"Dropped/duplicate rows written -> {dropped_path}")
 
     report_path, _ = write_report(
         REPORTS_DIR, PREFIX_DE, month_tag, input_path, df_raw, df_before_dedup, df_cleaned, output_path
     )
     print(f"Report written -> {report_path}")
 
-    return output_path, report_path
+    return output_path, report_path, dropped_path
 
 
 # ============================================================
@@ -310,17 +356,21 @@ PREFIX_DU = "HubDailyUsers"
 FILENAME_RE_DU = re.compile(r"^HubDailyUsers_(\d{4})-(\d{2})-\d{2}\.csv$")
 
 
-def clean_du(df: pd.DataFrame) -> pd.DataFrame:
+def clean_du(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     # Raw SessionDurationInSeconds actually holds hh:mm:ss strings despite its name;
     # kept as-is, not converted.
     df = df.drop(columns=["SessionDuration"]).rename(columns={"SessionDurationInSeconds": "SessionDuration"})
 
     present_ls_cols = [c for c in LS_COLS_DU if c in df.columns]
     is_blank = df[present_ls_cols].apply(lambda col: col.str.strip() == "").all(axis=1)
+    dropped_blank = df.loc[is_blank].copy()
     df = df.loc[~is_blank].copy()
 
     missing_key = df["Date"].str.strip() == ""
+    dropped_missing_key = df.loc[missing_key].copy()
     df = df.loc[~missing_key].copy()
+
+    dropped = pd.concat([dropped_blank, dropped_missing_key])
 
     # %f always zero-pads to 6-digit microseconds; slicing off the last 3 leaves milliseconds.
     df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d").dt.strftime("%Y-%m-%d %H:%M:%S.%f").str[:-3]
@@ -335,7 +385,7 @@ def clean_du(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.sort_values(by=SORT_COLS_DU, ascending=True).reset_index(drop=True)
 
-    return df
+    return df, dropped
 
 
 def _hms_to_seconds(value: str) -> int:
@@ -349,8 +399,10 @@ def _seconds_to_hms(total_seconds: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def collapse_duplicates_du(df: pd.DataFrame) -> pd.DataFrame:
+def collapse_duplicates_du(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df.copy()
+    duplicate_rows = df.loc[df.duplicated(subset=GROUP_COLS_DU, keep=False)].copy()
+
     df["Users"] = df["Users"].astype(int)
     df["Sessions"] = df["Sessions"].astype(int)
     df = df.groupby(GROUP_COLS_DU, as_index=False).agg({
@@ -358,29 +410,32 @@ def collapse_duplicates_du(df: pd.DataFrame) -> pd.DataFrame:
         "Sessions": "sum",
         "SessionDuration": lambda s: _seconds_to_hms(sum(_hms_to_seconds(v) for v in s)),
     })
-    return df[LS_COLS_DU]
+    return df[LS_COLS_DU], duplicate_rows
 
 
-def process_du() -> tuple[Path, Path]:
+def process_du() -> tuple[Path, Path, Path]:
     input_path = find_default_input(INPUT_DIR, PREFIX_DU, FILENAME_RE_DU)
     month_tag = month_tag_from_filename(input_path, PREFIX_DU, FILENAME_RE_DU)
 
     # Plain read, no engine/escapechar -- this file has no HTML content needing escaped
     # quotes, and those options only corrupt the real company name "TBWA\RAAD".
     df_raw = pd.read_csv(input_path, sep=";", dtype=str, keep_default_na=False, encoding="utf-8")
-    df_before_dedup = clean_du(df_raw)
-    df_cleaned = collapse_duplicates_du(df_before_dedup)
+    df_before_dedup, dropped_blank_du = clean_du(df_raw)
+    df_cleaned, duplicate_rows_du = collapse_duplicates_du(df_before_dedup)
 
     output_path = OUTPUT_DIR / f"{PREFIX_DU}_{month_tag}_cleaned.csv"
     df_cleaned.to_csv(output_path, sep=";", index=False, encoding="utf-8", quoting=csv.QUOTE_MINIMAL)
     print(f"Cleaned {len(df_cleaned)} rows -> {output_path}")
+
+    dropped_path = write_dropped_and_dupes(DROPPED_DIR, PREFIX_DU, month_tag, dropped_blank_du, duplicate_rows_du)
+    print(f"Dropped/duplicate rows written -> {dropped_path}")
 
     report_path, _ = write_report(
         REPORTS_DIR, PREFIX_DU, month_tag, input_path, df_raw, df_before_dedup, df_cleaned, output_path
     )
     print(f"Report written -> {report_path}")
 
-    return output_path, report_path
+    return output_path, report_path, dropped_path
 
 
 # ============================================================
@@ -406,15 +461,19 @@ PREFIX_MU = "HubMonthlyUsers"
 FILENAME_RE_MU = re.compile(r"^HubMonthlyUsers_(\d{4})-(\d{2})-\d{2}\.csv$")
 
 
-def clean_mu(df: pd.DataFrame) -> pd.DataFrame:
+def clean_mu(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df.rename(columns={"Date": "MonthDate"})
 
     present_ls_cols = [c for c in LS_COLS_MU if c in df.columns]
     is_blank = df[present_ls_cols].apply(lambda col: col.str.strip() == "").all(axis=1)
+    dropped_blank = df.loc[is_blank].copy()
     df = df.loc[~is_blank].copy()
 
     missing_key = df["MonthDate"].str.strip() == ""
+    dropped_missing_key = df.loc[missing_key].copy()
     df = df.loc[~missing_key].copy()
+
+    dropped = pd.concat([dropped_blank, dropped_missing_key])
 
     # %f always zero-pads to 6-digit microseconds; slicing off the last 3 leaves milliseconds.
     df["MonthDate"] = pd.to_datetime(df["MonthDate"], format="%Y-%m-%d").dt.strftime("%Y-%m-%d %H:%M:%S.%f").str[:-3]
@@ -428,36 +487,41 @@ def clean_mu(df: pd.DataFrame) -> pd.DataFrame:
     for col in LS_INT_COLS_MU:
         df[col] = df[col].astype(int)
 
-    return df
+    return df, dropped
 
 
-def collapse_duplicates_mu(df: pd.DataFrame) -> pd.DataFrame:
+def collapse_duplicates_mu(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df.copy()
+    duplicate_rows = df.loc[df.duplicated(subset=GROUP_COLS_MU, keep=False)].copy()
+
     for col in SUM_COLS_MU:
         df[col] = df[col].astype(int)
     df = df.groupby(GROUP_COLS_MU, as_index=False)[SUM_COLS_MU].sum()
-    return df[LS_COLS_MU]
+    return df[LS_COLS_MU], duplicate_rows
 
 
-def process_mu() -> tuple[Path, Path]:
+def process_mu() -> tuple[Path, Path, Path]:
     input_path = find_default_input(INPUT_DIR, PREFIX_MU, FILENAME_RE_MU)
     month_tag = month_tag_from_filename(input_path, PREFIX_MU, FILENAME_RE_MU)
 
     # Plain read, no engine/escapechar -- same reasoning as HubDailyUsers.
     df_raw = pd.read_csv(input_path, sep=";", dtype=str, keep_default_na=False, encoding="utf-8")
-    df_before_dedup = clean_mu(df_raw)
-    df_cleaned = collapse_duplicates_mu(df_before_dedup)
+    df_before_dedup, dropped_blank_mu = clean_mu(df_raw)
+    df_cleaned, duplicate_rows_mu = collapse_duplicates_mu(df_before_dedup)
 
     output_path = OUTPUT_DIR / f"{PREFIX_MU}_{month_tag}_cleaned.csv"
     df_cleaned.to_csv(output_path, sep=";", index=False, encoding="utf-8", quoting=csv.QUOTE_MINIMAL)
     print(f"Cleaned {len(df_cleaned)} rows -> {output_path}")
+
+    dropped_path = write_dropped_and_dupes(DROPPED_DIR, PREFIX_MU, month_tag, dropped_blank_mu, duplicate_rows_mu)
+    print(f"Dropped/duplicate rows written -> {dropped_path}")
 
     report_path, _ = write_report(
         REPORTS_DIR, PREFIX_MU, month_tag, input_path, df_raw, df_before_dedup, df_cleaned, output_path
     )
     print(f"Report written -> {report_path}")
 
-    return output_path, report_path
+    return output_path, report_path, dropped_path
 
 
 # ============================================================
@@ -480,13 +544,17 @@ PREFIX_AR = "HubAssessmentResults"
 FILENAME_RE_AR = re.compile(r"^HubAssessmentResults_(\d{4})-(\d{2})-\d{2}\.xlsx$")
 
 
-def clean_ar(df: pd.DataFrame) -> pd.DataFrame:
+def clean_ar(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     present_ls_cols = [c for c in LS_COLS_AR if c in df.columns]
     is_blank = df[present_ls_cols].apply(lambda col: col.str.strip() == "").all(axis=1)
+    dropped_blank = df.loc[is_blank].copy()
     df = df.loc[~is_blank].copy()
 
     missing_key = df["Date"].str.strip() == ""
+    dropped_missing_key = df.loc[missing_key].copy()
     df = df.loc[~missing_key].copy()
+
+    dropped = pd.concat([dropped_blank, dropped_missing_key])
 
     # The raw timestamp carries 7-digit fractional seconds and a UTC offset (always
     # "+00:00"); %f zero-pads/truncates to 6-digit microseconds, and slicing off the
@@ -513,21 +581,26 @@ def clean_ar(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.sort_values(by=SORT_COLS_AR, ascending=True).reset_index(drop=True)
 
-    return df
+    return df, dropped
 
 
-def process_ar() -> tuple[Path, Path]:
+def process_ar() -> tuple[Path, Path, Path]:
     input_path = find_default_input(INPUT_DIR, PREFIX_AR, FILENAME_RE_AR, ext="xlsx")
     month_tag = month_tag_from_filename(input_path, PREFIX_AR, FILENAME_RE_AR, ext="xlsx")
 
     # pd.read_excel reads cell values directly rather than tokenizing a delimited text
     # stream, so there's no escapechar/backslash-protection concept to apply here.
     df_raw = pd.read_excel(input_path, sheet_name="Sheet1", dtype=str, keep_default_na=False)
-    df_cleaned = clean_ar(df_raw)
+    df_cleaned, dropped_blank_ar = clean_ar(df_raw)
 
     output_path = OUTPUT_DIR / f"{PREFIX_AR}_{month_tag}_cleaned.csv"
     df_cleaned.to_csv(output_path, sep=";", index=False, encoding="utf-8", quoting=csv.QUOTE_MINIMAL)
     print(f"Cleaned {len(df_cleaned)} rows -> {output_path}")
+
+    # No dedup step for this dataset (per the notes), so there are no duplicate-collapsed
+    # rows to report -- pass an empty frame through.
+    dropped_path = write_dropped_and_dupes(DROPPED_DIR, PREFIX_AR, month_tag, dropped_blank_ar, pd.DataFrame())
+    print(f"Dropped/duplicate rows written -> {dropped_path}")
 
     # No dedup step for this dataset (per the notes) -- df_before_dedup=df_cleaned makes
     # "Duplicate rows collapsed" report as 0 while raw/cleaned duplicate counts still show.
@@ -536,28 +609,29 @@ def process_ar() -> tuple[Path, Path]:
     )
     print(f"Report written -> {report_path}")
 
-    return output_path, report_path
+    return output_path, report_path, dropped_path
 
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    DROPPED_DIR.mkdir(parents=True, exist_ok=True)
 
-    output_path_dc, report_path_dc = process_dc()
-    output_path_de, report_path_de = process_de()
-    output_path_du, report_path_du = process_du()
-    output_path_mu, report_path_mu = process_mu()
-    output_path_ar, report_path_ar = process_ar()
+    output_path_dc, report_path_dc, dropped_path_dc = process_dc()
+    output_path_de, report_path_de, dropped_path_de = process_de()
+    output_path_du, report_path_du, dropped_path_du = process_du()
+    output_path_mu, report_path_mu, dropped_path_mu = process_mu()
+    output_path_ar, report_path_ar, dropped_path_ar = process_ar()
 
     print("\nCleaned outputs:")
-    for label, out_path, rpt_path in [
-        ("DailyContent", output_path_dc, report_path_dc),
-        ("DailyEvents", output_path_de, report_path_de),
-        ("DailyUsers", output_path_du, report_path_du),
-        ("MonthlyUsers", output_path_mu, report_path_mu),
-        ("AssessmentResults", output_path_ar, report_path_ar),
+    for label, out_path, rpt_path, drp_path in [
+        ("DailyContent", output_path_dc, report_path_dc, dropped_path_dc),
+        ("DailyEvents", output_path_de, report_path_de, dropped_path_de),
+        ("DailyUsers", output_path_du, report_path_du, dropped_path_du),
+        ("MonthlyUsers", output_path_mu, report_path_mu, dropped_path_mu),
+        ("AssessmentResults", output_path_ar, report_path_ar, dropped_path_ar),
     ]:
-        print(f"  {label:14s} -> {out_path.name}  (report: {rpt_path.name})")
+        print(f"  {label:14s} -> {out_path.name}  (report: {rpt_path.name}, dropped/dupes: {drp_path.name})")
 
 
 if __name__ == "__main__":

@@ -11,9 +11,11 @@ __pycache__/
 input/*
 output/*
 reports/*
+dropped_and_dupes/*
 !input/.gitkeep
 !output/.gitkeep
 !reports/.gitkeep
+!dropped_and_dupes/.gitkeep
 
 # Sync the to_upload folder, but ignore the CSV files inside it
 !output/to_upload/
