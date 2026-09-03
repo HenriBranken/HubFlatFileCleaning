@@ -110,6 +110,18 @@ def strip_html(value: str) -> str:
     return text.replace("\xa0", " ").strip()
 
 
+def blank_out_null_text(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize literal "null"/"Null"/"NULL" text entries (a Hub export quirk, distinct
+    from a genuinely empty cell) to blank, so downstream blank/missing-key checks and the
+    cleaned output treat them the same as an empty cell.
+    """
+    df = df.copy()
+    for col in df.columns:
+        is_null_text = df[col].str.strip().str.lower() == "null"
+        df.loc[is_null_text, col] = ""
+    return df
+
+
 def read_semicolon_csv_protecting_backslashes(path: Path) -> pd.DataFrame:
     with open(path, "r", encoding="utf-8") as f:
         raw_text = f.read()
@@ -157,6 +169,7 @@ FILENAME_RE_DC = re.compile(r"^HubDailyContentData_(\d{4})-(\d{2})-\d{2}\.csv$")
 
 
 def clean_dc(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    df = blank_out_null_text(df)
     df = df.rename(columns=RENAME_MAP_DC)
 
     present_ls_cols = [c for c in LS_COLS_DC if c in df.columns]
@@ -260,6 +273,7 @@ FILENAME_RE_DE = re.compile(r"^HubDailyEventData_(\d{4})-(\d{2})-\d{2}\.csv$")
 
 
 def clean_de(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    df = blank_out_null_text(df)
     df = df.rename(columns=RENAME_MAP_DE)
 
     present_ls_cols = [c for c in LS_COLS_DE if c in df.columns]
@@ -357,6 +371,8 @@ FILENAME_RE_DU = re.compile(r"^HubDailyUsers_(\d{4})-(\d{2})-\d{2}\.csv$")
 
 
 def clean_du(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    df = blank_out_null_text(df)
+
     # Raw SessionDurationInSeconds actually holds hh:mm:ss strings despite its name;
     # kept as-is, not converted.
     df = df.drop(columns=["SessionDuration"]).rename(columns={"SessionDurationInSeconds": "SessionDuration"})
@@ -462,6 +478,7 @@ FILENAME_RE_MU = re.compile(r"^HubMonthlyUsers_(\d{4})-(\d{2})-\d{2}\.csv$")
 
 
 def clean_mu(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    df = blank_out_null_text(df)
     df = df.rename(columns={"Date": "MonthDate"})
 
     present_ls_cols = [c for c in LS_COLS_MU if c in df.columns]
@@ -545,6 +562,8 @@ FILENAME_RE_AR = re.compile(r"^HubAssessmentResults_(\d{4})-(\d{2})-\d{2}\.xlsx$
 
 
 def clean_ar(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    df = blank_out_null_text(df)
+
     present_ls_cols = [c for c in LS_COLS_AR if c in df.columns]
     is_blank = df[present_ls_cols].apply(lambda col: col.str.strip() == "").all(axis=1)
     dropped_blank = df.loc[is_blank].copy()
