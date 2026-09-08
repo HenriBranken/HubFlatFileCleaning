@@ -144,6 +144,16 @@ def blank_out_null_text(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def replace_icas_with_lyra(df: pd.DataFrame) -> pd.DataFrame:
+    """Hub's raw Operation values still carry the pre-rebrand "ICAS" name (e.g. "ICAS
+    Latina", "ICAS Botswana"); replace it with "Lyra" (case-insensitive) so the cleaned
+    output reflects the current brand name.
+    """
+    df = df.copy()
+    df["Operation"] = df["Operation"].str.replace("icas", "Lyra", regex=True, flags=re.IGNORECASE)
+    return df
+
+
 def sum_int_cols(df: pd.DataFrame, cols: list[str]) -> dict[str, int]:
     """Sum each of `cols` (casting to int first, so this works whether or not the caller
     already cast the column) -- used to compare measure totals before/after dedup.
@@ -219,6 +229,8 @@ def clean_dc(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     for col in LS_STRING_COLS_DC:
         df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
+
+    df = replace_icas_with_lyra(df)
 
     for col in LS_INT_COLS_DC:
         df[col] = df[col].astype(int)
@@ -336,6 +348,8 @@ def clean_de(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     for col in LS_STRING_COLS_DE:
         df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
 
+    df = replace_icas_with_lyra(df)
+
     for col in LS_INT_COLS_DE:
         df[col] = df[col].astype(int)
 
@@ -430,6 +444,8 @@ def clean_du(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     for col in LS_STRING_COLS_DU:
         df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
+
+    df = replace_icas_with_lyra(df)
 
     for col in LS_INT_COLS_DU:
         df[col] = df[col].astype(int)
@@ -544,6 +560,8 @@ def clean_mu(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     for col in LS_STRING_COLS_MU:
         df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
 
+    df = replace_icas_with_lyra(df)
+
     for col in LS_INT_COLS_MU:
         df[col] = df[col].astype(int)
 
@@ -640,6 +658,8 @@ def clean_ar(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     for col in LS_STRING_COLS_AR:
         df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
+
+    df = replace_icas_with_lyra(df)
 
     for col in LS_INT_COLS_AR:
         df[col] = df[col].astype(int)
