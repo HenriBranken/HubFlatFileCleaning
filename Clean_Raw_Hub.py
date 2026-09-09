@@ -51,6 +51,7 @@ def write_report(
     df_before_dedup: pd.DataFrame,
     df_cleaned: pd.DataFrame,
     output_path: Path,
+    raw_sums: dict[str, int],
     before_sums: dict[str, int],
     after_sums: dict[str, int],
 ) -> tuple[Path, str]:
@@ -67,21 +68,24 @@ def write_report(
         f"Cleaned duplicate rows: {int(df_cleaned.duplicated().sum())}",
         f"Output file: {output_path.name}",
         "=======================================================================",
-        "Numeric field sums, before dedup (post blank-drop) vs after dedup:",
+        "Numeric field sums, raw vs before dedup (post blank-drop) vs after dedup:",
     ]
 
     if before_sums:
         label_width = max(len(col) for col in before_sums)
         all_match = True
         for col, before_val in before_sums.items():
+            raw_val = raw_sums[col]
             after_val = after_sums[col]
             match = before_val == after_val
             all_match = all_match and match
             report_lines.append(
-                f"  {col:<{label_width}}  before={before_val:<15} after={after_val:<15} "
+                f"  {col:<{label_width}}  raw={raw_val:<15} before={before_val:<15} after={after_val:<15} "
                 f"{'MATCH' if match else 'MISMATCH'}"
             )
-        report_lines.append(f"All numeric sums match: {all_match}")
+        # "raw" is expected to differ from "before" whenever dropped blank/missing-key rows
+        # had nonzero measure values, so the match check stays scoped to before-vs-after.
+        report_lines.append(f"All before/after sums match: {all_match}")
     else:
         report_lines.append("  (no numeric fields for this dataset)")
 
@@ -159,6 +163,15 @@ def sum_int_cols(df: pd.DataFrame, cols: list[str]) -> dict[str, int]:
     already cast the column) -- used to compare measure totals before/after dedup.
     """
     return {col: int(df[col].astype(int).sum()) for col in cols}
+
+
+def sum_raw_numeric_cols(df: pd.DataFrame, cols: list[str]) -> dict[str, int]:
+    """Sum each of `cols` on the raw, not-yet-cleaned dataframe. Unlike sum_int_cols, this
+    can't assume every value is an int-castable string -- rows that clean_xx() will later
+    drop as blank/missing-key are still present here and may hold blank cells -- so
+    non-numeric/blank values are coerced to 0 instead of raising.
+    """
+    return {col: int(pd.to_numeric(df[col], errors="coerce").fillna(0).sum()) for col in cols}
 
 
 def read_semicolon_csv_protecting_backslashes(path: Path) -> pd.DataFrame:
@@ -266,11 +279,12 @@ def process_dc() -> tuple[Path, Path, Path]:
     dropped_path = write_dropped_and_dupes(DROPPED_DIR, PREFIX_DC, month_tag, dropped_blank_dc, duplicate_rows_dc)
     print(f"Dropped/duplicate rows written -> {dropped_path}")
 
+    raw_sums_dc = sum_raw_numeric_cols(df_raw, SUM_COLS_DC)
     before_sums_dc = sum_int_cols(df_before_dedup, SUM_COLS_DC)
     after_sums_dc = sum_int_cols(df_cleaned, SUM_COLS_DC)
     report_path, _ = write_report(
         REPORTS_DIR, PREFIX_DC, month_tag, input_path, df_raw, df_before_dedup, df_cleaned, output_path,
-        before_sums_dc, after_sums_dc,
+        raw_sums_dc, before_sums_dc, after_sums_dc,
     )
     print(f"Report written -> {report_path}")
 
@@ -383,11 +397,18 @@ def process_de() -> tuple[Path, Path, Path]:
     dropped_path = write_dropped_and_dupes(DROPPED_DIR, PREFIX_DE, month_tag, dropped_blank_de, duplicate_rows_de)
     print(f"Dropped/duplicate rows written -> {dropped_path}")
 
+    # RENAME_MAP_DE renames raw "EventsPerSessionWithEvent" to the cleaned
+    # "Events/SessionwithEvent" -- sum the raw name but report it under the cleaned label
+    # so it lines up with the before/after row for the same measure.
+    raw_sums_de = sum_raw_numeric_cols(df_raw, ["Users", "TotalEvents", "UniqueEvents", "SessionsWithEvent"])
+    raw_sums_de["Events/SessionwithEvent"] = int(
+        pd.to_numeric(df_raw["EventsPerSessionWithEvent"], errors="coerce").fillna(0).sum()
+    )
     before_sums_de = sum_int_cols(df_before_dedup, SUM_COLS_DE)
     after_sums_de = sum_int_cols(df_cleaned, SUM_COLS_DE)
     report_path, _ = write_report(
         REPORTS_DIR, PREFIX_DE, month_tag, input_path, df_raw, df_before_dedup, df_cleaned, output_path,
-        before_sums_de, after_sums_de,
+        raw_sums_de, before_sums_de, after_sums_de,
     )
     print(f"Report written -> {report_path}")
 
@@ -500,13 +521,22 @@ def process_du() -> tuple[Path, Path, Path]:
     # SessionDuration is a hh:mm:ss string, not an int column -- sum it separately in
     # seconds via the same helpers collapse_duplicates_du uses, rather than through
     # sum_int_cols (which assumes every column is directly int-castable).
+    # clean_du() drops raw "SessionDuration" (an unrelated, discarded value) and renames
+    # raw "SessionDurationInSeconds" (the actual hh:mm:ss duration) to cleaned
+    # "SessionDuration" -- so the raw sum must read SessionDurationInSeconds too, skipping
+    # blank cells from rows clean_du() hasn't dropped yet (unlike the post-blank-drop
+    # before/after values, which _hms_to_seconds can assume are well-formed).
+    raw_sums_du = sum_raw_numeric_cols(df_raw, ["Users", "Sessions"])
+    raw_sums_du["SessionDuration (sec)"] = sum(
+        _hms_to_seconds(v) for v in df_raw["SessionDurationInSeconds"] if v
+    )
     before_sums_du = sum_int_cols(df_before_dedup, ["Users", "Sessions"])
     before_sums_du["SessionDuration (sec)"] = sum(_hms_to_seconds(v) for v in df_before_dedup["SessionDuration"])
     after_sums_du = sum_int_cols(df_cleaned, ["Users", "Sessions"])
     after_sums_du["SessionDuration (sec)"] = sum(_hms_to_seconds(v) for v in df_cleaned["SessionDuration"])
     report_path, _ = write_report(
         REPORTS_DIR, PREFIX_DU, month_tag, input_path, df_raw, df_before_dedup, df_cleaned, output_path,
-        before_sums_du, after_sums_du,
+        raw_sums_du, before_sums_du, after_sums_du,
     )
     print(f"Report written -> {report_path}")
 
@@ -594,11 +624,12 @@ def process_mu() -> tuple[Path, Path, Path]:
     dropped_path = write_dropped_and_dupes(DROPPED_DIR, PREFIX_MU, month_tag, dropped_blank_mu, duplicate_rows_mu)
     print(f"Dropped/duplicate rows written -> {dropped_path}")
 
+    raw_sums_mu = sum_raw_numeric_cols(df_raw, SUM_COLS_MU)
     before_sums_mu = sum_int_cols(df_before_dedup, SUM_COLS_MU)
     after_sums_mu = sum_int_cols(df_cleaned, SUM_COLS_MU)
     report_path, _ = write_report(
         REPORTS_DIR, PREFIX_MU, month_tag, input_path, df_raw, df_before_dedup, df_cleaned, output_path,
-        before_sums_mu, after_sums_mu,
+        raw_sums_mu, before_sums_mu, after_sums_mu,
     )
     print(f"Report written -> {report_path}")
 
@@ -689,9 +720,9 @@ def process_ar() -> tuple[Path, Path, Path]:
 
     # No dedup step for this dataset (per the notes) -- df_before_dedup=df_cleaned makes
     # "Duplicate rows collapsed" report as 0 while raw/cleaned duplicate counts still show.
-    # LS_INT_COLS_AR is empty (no numeric fields in this schema), so both sum dicts are empty.
+    # LS_INT_COLS_AR is empty (no numeric fields in this schema), so all three sum dicts are empty.
     report_path, _ = write_report(
-        REPORTS_DIR, PREFIX_AR, month_tag, input_path, df_raw, df_cleaned, df_cleaned, output_path, {}, {}
+        REPORTS_DIR, PREFIX_AR, month_tag, input_path, df_raw, df_cleaned, df_cleaned, output_path, {}, {}, {}
     )
     print(f"Report written -> {report_path}")
 
