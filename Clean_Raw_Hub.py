@@ -90,9 +90,10 @@ def write_report(
         report_lines.append("  (no numeric fields for this dataset)")
 
     report_lines.append("=======================================================================")
+    report_lines.append("Column-level stats for cleaned output:")
+    report_lines.extend(column_stats_lines(df_cleaned))
 
     report_text = "\n".join(report_lines) + "\n"
-    report_text += "\n\n\n" + df_cleaned.describe().to_string() + "\n"
 
     reports_dir.mkdir(parents=True, exist_ok=True)
     report_path = reports_dir / f"{prefix}_{month_tag}_report.txt"
@@ -172,6 +173,39 @@ def sum_raw_numeric_cols(df: pd.DataFrame, cols: list[str]) -> dict[str, int]:
     non-numeric/blank values are coerced to 0 instead of raising.
     """
     return {col: int(pd.to_numeric(df[col], errors="coerce").fillna(0).sum()) for col in cols}
+
+
+def column_stats_lines(df: pd.DataFrame) -> list[str]:
+    """Build a Count/CountDistinct/MissingValueCount table for every column of the final
+    cleaned output, in column order -- replaces df.describe() (numeric-only, and
+    uninformative for the mostly-string schemas here) with a report that covers every
+    output column regardless of dtype.
+    """
+    rows = []
+    for col in df.columns:
+        series = df[col]
+        if pd.api.types.is_numeric_dtype(series):
+            is_missing = series.isna()
+        else:
+            is_missing = series.isna() | (series.astype(str).str.strip() == "")
+        non_missing = series[~is_missing]
+        rows.append((col, len(non_missing), non_missing.nunique(), int(is_missing.sum())))
+
+    headers = ("Column", "Count", "CountDistinct", "MissingValueCount")
+    col_width = max(len(headers[0]), max(len(r[0]) for r in rows))
+    count_width = max(len(headers[1]), max(len(str(r[1])) for r in rows))
+    distinct_width = max(len(headers[2]), max(len(str(r[2])) for r in rows))
+
+    lines = [
+        f"  {headers[0]:<{col_width}}  {headers[1]:<{count_width}}  "
+        f"{headers[2]:<{distinct_width}}  {headers[3]}"
+    ]
+    for name, count, count_distinct, missing_count in rows:
+        lines.append(
+            f"  {name:<{col_width}}  {count:<{count_width}}  "
+            f"{count_distinct:<{distinct_width}}  {missing_count}"
+        )
+    return lines
 
 
 def read_semicolon_csv_protecting_backslashes(path: Path) -> pd.DataFrame:
